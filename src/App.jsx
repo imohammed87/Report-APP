@@ -1,0 +1,423 @@
+import { useState, useRef } from "react";
+
+const COLORS = {
+  navy: "#1C2E4A", navyLight: "#243656", gold: "#C9A84C", goldLight: "#E8C96A",
+  white: "#FFFFFF", bg: "#F0F3F8", cardBg: "#FFFFFF",
+  gray100: "#F5F7FA", gray200: "#E8ECF2", gray400: "#9CA8BB", gray600: "#5A6680", gray800: "#2D3A52",
+  green: "#1DB87A", greenLight: "#E6F9F1", orange: "#F5872A", orangeLight: "#FEF3E8",
+  red: "#E53E3E", redLight: "#FEE8E8",
+};
+
+const STATUS_MAP = {
+  draft:    { label: "مسودة",         color: COLORS.gray400, bg: COLORS.gray200,    icon: "◯" },
+  pending:  { label: "قيد المراجعة",  color: COLORS.orange,  bg: COLORS.orangeLight, icon: "◑" },
+  revision: { label: "يحتاج تعديل",  color: "#E5890A",      bg: "#FEF3E0",          icon: "↩" },
+  approved: { label: "معتمد",         color: COLORS.green,   bg: COLORS.greenLight,  icon: "✓" },
+  rejected: { label: "مرفوض",         color: COLORS.red,     bg: COLORS.redLight,    icon: "✕" },
+};
+
+const TYPES = ["يومي", "أسبوعي", "شهري", "استثنائي"];
+const DEPTS = ["التخطيط والتطوير", "الموارد البشرية", "تقنية المعلومات", "المالية والمحاسبة", "العمليات"];
+
+const INITIAL_REPORTS = [
+  { id: "RPT-001", title: "تقرير الأداء الأسبوعي - يونيو", type: "أسبوعي", dept: "تقنية المعلومات", author: "فيصل الحمزاني", date: "2026-06-20", status: "approved", content: "تم إنجاز 94% من المهام المخطط لها هذا الأسبوع.", managerNote: "", pdfData: null, pdfName: null },
+  { id: "RPT-002", title: "تقرير المتابعة الشهري - مايو", type: "شهري", dept: "الموارد البشرية", author: "سارة العتيبي", date: "2026-06-15", status: "pending", content: "معدل الحضور 97%، تم إنهاء 3 عقود وتعيين 5 موظفين جدد.", managerNote: "", pdfData: null, pdfName: null },
+  { id: "RPT-003", title: "تقرير طارئ - عطل النظام", type: "استثنائي", dept: "تقنية المعلومات", author: "محمد الدوسري", date: "2026-06-25", status: "revision", content: "حدث عطل في الخادم الرئيسي بتاريخ 25/6، تم إيقاف الخدمة لمدة ساعتين.", managerNote: "يرجى إضافة الإجراءات التصحيحية المتخذة وخطة الطوارئ.", pdfData: null, pdfName: null },
+  { id: "RPT-004", title: "التقرير اليومي - الاثنين", type: "يومي", dept: "المالية والمحاسبة", author: "نورة القحطاني", date: "2026-06-27", status: "draft", content: "", managerNote: "", pdfData: null, pdfName: null },
+];
+
+let reportIdCounter = 5;
+
+function Badge({ status }) {
+  const s = STATUS_MAP[status];
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+      {s.icon} {s.label}
+    </span>
+  );
+}
+
+function StatCard({ label, value, color, icon }) {
+  return (
+    <div style={{ background: COLORS.cardBg, borderRadius: 14, padding: "20px 22px", boxShadow: "0 2px 12px rgba(28,46,74,0.07)", borderTop: `4px solid ${color}`, flex: 1, minWidth: 140 }}>
+      <div style={{ fontSize: 28, marginBottom: 4 }}>{icon}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: COLORS.navy }}>{value}</div>
+      <div style={{ fontSize: 13, color: COLORS.gray600 }}>{label}</div>
+    </div>
+  );
+}
+
+function ReportRow({ report, onSelect }) {
+  return (
+    <div onClick={() => onSelect(report)}
+      style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", background: COLORS.cardBg, borderRadius: 10, marginBottom: 8, boxShadow: "0 1px 6px rgba(28,46,74,0.06)", cursor: "pointer", transition: "all 0.15s", border: "1.5px solid transparent" }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = COLORS.gold}
+      onMouseLeave={e => e.currentTarget.style.borderColor = "transparent"}
+    >
+      <div style={{ width: 42, height: 42, borderRadius: 10, background: COLORS.navy + "15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+        {report.pdfData ? "📎" : "📄"}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 700, color: COLORS.navy, fontSize: 14 }}>{report.title}</div>
+        <div style={{ fontSize: 12, color: COLORS.gray600, marginTop: 3 }}>
+          {report.author} · {report.dept} · {report.date}
+          {report.pdfName && <span style={{ color: COLORS.gold, marginRight: 6 }}>· 📎 {report.pdfName}</span>}
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+        <Badge status={report.status} />
+        <span style={{ fontSize: 11, color: COLORS.gray400 }}>{report.id}</span>
+      </div>
+    </div>
+  );
+}
+
+function PdfUploader({ onUpload, currentPdf, currentPdfName }) {
+  const inputRef = useRef();
+  const [dragging, setDragging] = useState(false);
+
+  const handleFile = (file) => {
+    if (!file || file.type !== "application/pdf") return;
+    const reader = new FileReader();
+    reader.onload = (e) => onUpload(e.target.result, file.name);
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div>
+      <label style={{ fontSize: 13, color: COLORS.gray600, display: "block", marginBottom: 6 }}>ملف PDF (اختياري)</label>
+      <div
+        onClick={() => inputRef.current.click()}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }}
+        style={{
+          border: `2px dashed ${dragging ? COLORS.gold : currentPdf ? COLORS.green : COLORS.gray200}`,
+          borderRadius: 10, padding: "18px 14px", textAlign: "center",
+          cursor: "pointer", background: dragging ? COLORS.gold + "10" : currentPdf ? COLORS.greenLight : COLORS.gray100,
+          transition: "all 0.2s",
+        }}
+      >
+        {currentPdf ? (
+          <div>
+            <div style={{ fontSize: 28, marginBottom: 4 }}>📎</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.green }}>{currentPdfName}</div>
+            <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>اضغط لتغيير الملف</div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 32, marginBottom: 6 }}>📄</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.gray600 }}>اسحب ملف PDF هنا أو اضغط للرفع</div>
+            <div style={{ fontSize: 11, color: COLORS.gray400, marginTop: 4 }}>PDF فقط · حجم أقصى 10MB</div>
+          </div>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} />
+    </div>
+  );
+}
+
+function SubmitForm({ onSubmit, onCancel }) {
+  const [form, setForm] = useState({ title: "", type: TYPES[0], dept: DEPTS[0], content: "", pdfData: null, pdfName: null });
+  const [loading, setLoading] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async () => {
+    if (!form.title) return;
+    setLoading(true);
+    await new Promise(r => setTimeout(r, 400));
+    onSubmit(form);
+    setLoading(false);
+  };
+
+  const inputStyle = { width: "100%", border: `1.5px solid ${COLORS.gray200}`, borderRadius: 8, padding: "10px 12px", fontSize: 14, color: COLORS.navy, background: COLORS.gray100, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
+
+  return (
+    <div style={{ background: COLORS.cardBg, borderRadius: 14, padding: 28, boxShadow: "0 4px 20px rgba(28,46,74,0.1)" }}>
+      <div style={{ fontWeight: 800, fontSize: 18, color: COLORS.navy, marginBottom: 22 }}>📝 رفع تقرير جديد</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <div>
+          <label style={{ fontSize: 13, color: COLORS.gray600, display: "block", marginBottom: 6 }}>عنوان التقرير *</label>
+          <input style={inputStyle} value={form.title} onChange={e => set("title", e.target.value)} placeholder="مثال: تقرير الأداء الأسبوعي" />
+        </div>
+        <div>
+          <label style={{ fontSize: 13, color: COLORS.gray600, display: "block", marginBottom: 6 }}>نوع التقرير</label>
+          <select style={inputStyle} value={form.type} onChange={e => set("type", e.target.value)}>
+            {TYPES.map(t => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 13, color: COLORS.gray600, display: "block", marginBottom: 6 }}>القسم</label>
+        <select style={inputStyle} value={form.dept} onChange={e => set("dept", e.target.value)}>
+          {DEPTS.map(d => <option key={d}>{d}</option>)}
+        </select>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 13, color: COLORS.gray600, display: "block", marginBottom: 6 }}>ملاحظات (اختياري)</label>
+        <textarea style={{ ...inputStyle, minHeight: 80, resize: "vertical" }} value={form.content} onChange={e => set("content", e.target.value)} placeholder="أي ملاحظات إضافية..." />
+      </div>
+
+      <div style={{ marginBottom: 22 }}>
+        <PdfUploader
+          currentPdf={form.pdfData}
+          currentPdfName={form.pdfName}
+          onUpload={(data, name) => { set("pdfData", data); set("pdfName", name); }}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button onClick={handleSubmit} disabled={loading || !form.title} style={{ background: loading ? COLORS.gray400 : COLORS.gold, color: COLORS.navy, border: "none", borderRadius: 8, padding: "10px 24px", fontWeight: 700, fontSize: 14, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+          {loading ? "⏳ جاري الإرسال..." : "📤 إرسال للمراجعة"}
+        </button>
+        <button onClick={onCancel} style={{ background: "transparent", color: COLORS.gray600, border: `1.5px solid ${COLORS.gray200}`, borderRadius: 8, padding: "10px 20px", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>إلغاء</button>
+      </div>
+    </div>
+  );
+}
+
+function PdfViewer({ pdfData, pdfName }) {
+  const [show, setShow] = useState(false);
+  if (!pdfData) return null;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.greenLight, border: `1.5px solid ${COLORS.green}30`, borderRadius: 10, padding: "12px 16px", marginBottom: show ? 0 : 0, borderRadius: show ? "10px 10px 0 0" : 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 20 }}>📎</span>
+          <div>
+            <div style={{ fontWeight: 700, color: COLORS.navy, fontSize: 13 }}>{pdfName}</div>
+            <div style={{ fontSize: 11, color: COLORS.gray600 }}>ملف PDF مرفق</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setShow(s => !s)} style={{ background: COLORS.green, color: "white", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600 }}>
+            {show ? "إخفاء" : "👁 عرض"}
+          </button>
+          <a href={pdfData} download={pdfName} style={{ background: COLORS.navy, color: "white", border: "none", borderRadius: 6, padding: "6px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, textDecoration: "none" }}>
+            ⬇ تحميل
+          </a>
+        </div>
+      </div>
+      {show && (
+        <div style={{ border: `1.5px solid ${COLORS.green}30`, borderTop: "none", borderRadius: "0 0 10px 10px", overflow: "hidden" }}>
+          <iframe src={pdfData} width="100%" height="500px" style={{ display: "block", border: "none" }} title={pdfName} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportDetail({ report, role, onClose, onAction }) {
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const doAction = async (action) => {
+    setLoading(true);
+    await new Promise(r => setTimeout(r, 300));
+    onAction(report.id, action, note);
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(28,46,74,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: COLORS.cardBg, borderRadius: 16, width: "100%", maxWidth: 700, maxHeight: "92vh", overflow: "auto", boxShadow: "0 20px 60px rgba(28,46,74,0.25)" }}>
+
+        <div style={{ background: COLORS.navy, padding: "20px 24px", borderRadius: "16px 16px 0 0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ color: COLORS.gold, fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{report.id}</div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{report.title}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "white", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 16, fontFamily: "inherit" }}>✕</button>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
+            <Badge status={report.status} />
+            <span style={{ background: COLORS.gray100, color: COLORS.gray600, padding: "3px 10px", borderRadius: 20, fontSize: 12 }}>📂 {report.type}</span>
+            <span style={{ background: COLORS.gray100, color: COLORS.gray600, padding: "3px 10px", borderRadius: 20, fontSize: 12 }}>🏢 {report.dept}</span>
+            <span style={{ background: COLORS.gray100, color: COLORS.gray600, padding: "3px 10px", borderRadius: 20, fontSize: 12 }}>👤 {report.author}</span>
+            <span style={{ background: COLORS.gray100, color: COLORS.gray600, padding: "3px 10px", borderRadius: 20, fontSize: 12 }}>📅 {report.date}</span>
+          </div>
+
+          {/* PDF Viewer */}
+          <PdfViewer pdfData={report.pdfData} pdfName={report.pdfName} />
+
+          {/* Notes */}
+          {report.content && (
+            <div style={{ background: COLORS.gray100, borderRadius: 10, padding: 16, marginBottom: 16, fontSize: 14, color: COLORS.gray800, lineHeight: 1.7 }}>
+              {report.content}
+            </div>
+          )}
+
+          {report.managerNote && (
+            <div style={{ background: COLORS.orangeLight, border: `1.5px solid ${COLORS.orange}20`, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: COLORS.orange, fontWeight: 700, marginBottom: 6 }}>ملاحظة المدير</div>
+              <div style={{ fontSize: 14, color: COLORS.gray800 }}>{report.managerNote}</div>
+            </div>
+          )}
+
+          {role === "manager" && report.status === "pending" && (
+            <div style={{ borderTop: `1.5px solid ${COLORS.gray200}`, paddingTop: 16 }}>
+              <div style={{ fontSize: 13, color: COLORS.gray600, marginBottom: 8 }}>ملاحظة (اختياري)</div>
+              <textarea
+                style={{ width: "100%", border: `1.5px solid ${COLORS.gray200}`, borderRadius: 8, padding: "10px 12px", fontSize: 14, minHeight: 80, resize: "vertical", fontFamily: "inherit", color: COLORS.navy, background: COLORS.gray100, outline: "none", boxSizing: "border-box", marginBottom: 12 }}
+                value={note} onChange={e => setNote(e.target.value)} placeholder="أضف ملاحظة للموظف..."
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => doAction("approved")} disabled={loading} style={{ background: COLORS.green, color: "white", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>✓ اعتماد</button>
+                <button onClick={() => doAction("revision")} disabled={loading} style={{ background: COLORS.orange, color: "white", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>↩ إعادة للتعديل</button>
+                <button onClick={() => doAction("rejected")} disabled={loading} style={{ background: COLORS.red, color: "white", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>✕ رفض</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [role, setRole] = useState("employee");
+  const [view, setView] = useState("dashboard");
+  const [reports, setReports] = useState(INITIAL_REPORTS);
+  const [selected, setSelected] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+
+  const stats = {
+    total: reports.length,
+    pending: reports.filter(r => r.status === "pending").length,
+    approved: reports.filter(r => r.status === "approved").length,
+    revision: reports.filter(r => r.status === "revision").length,
+  };
+
+  const visibleReports = role === "manager"
+    ? reports.filter(r => r.status === "pending" || r.status === "revision")
+    : reports;
+
+  const handleSubmit = (form) => {
+    const newReport = {
+      id: `RPT-00${reportIdCounter++}`,
+      ...form,
+      author: "محمد البقامي",
+      date: new Date().toISOString().split("T")[0],
+      status: "pending",
+      managerNote: "",
+    };
+    setReports(prev => [newReport, ...prev]);
+    setShowForm(false);
+  };
+
+  const handleAction = (id, action, note) => {
+    setReports(prev => prev.map(r => r.id === id ? { ...r, status: action, managerNote: note } : r));
+    setSelected(null);
+  };
+
+  const sideItems = [
+    { id: "dashboard", icon: "📊", label: "لوحة التحكم" },
+    { id: "reports", icon: "📄", label: role === "manager" ? "التقارير المعلقة" : "التقارير" },
+    { id: "all", icon: "📋", label: "جميع التقارير" },
+  ];
+
+  const roleLabels = { employee: "موظف", manager: "مدير", admin: "الإدارة العليا" };
+
+  return (
+    <div style={{ direction: "rtl", fontFamily: "'Segoe UI', 'Tahoma', Arial, sans-serif", background: COLORS.bg, minHeight: "100vh", display: "flex" }}>
+      <div style={{ width: 220, background: COLORS.navy, minHeight: "100vh", display: "flex", flexDirection: "column", flexShrink: 0, boxShadow: "4px 0 20px rgba(28,46,74,0.15)" }}>
+        <div style={{ padding: "24px 20px 20px" }}>
+          <div style={{ color: COLORS.gold, fontWeight: 900, fontSize: 18 }}>📊 بوابة التقارير</div>
+          <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, marginTop: 4 }}>منصة إدارة التقارير</div>
+        </div>
+        <div style={{ padding: "0 16px 20px" }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>الدور الحالي</div>
+          <select value={role} onChange={e => { setRole(e.target.value); setView("dashboard"); }}
+            style={{ width: "100%", background: COLORS.navyLight, color: "white", border: "1.5px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", cursor: "pointer", outline: "none" }}>
+            <option value="employee">👤 موظف</option>
+            <option value="manager">👔 مدير</option>
+            <option value="admin">🏛️ الإدارة العليا</option>
+          </select>
+        </div>
+        <nav style={{ flex: 1, padding: "0 12px" }}>
+          {sideItems.map(item => (
+            <div key={item.id} onClick={() => { setView(item.id); setShowForm(false); }}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", borderRadius: 10, marginBottom: 4, cursor: "pointer", background: view === item.id ? COLORS.gold + "22" : "transparent", borderRight: view === item.id ? `3px solid ${COLORS.gold}` : "3px solid transparent", color: view === item.id ? COLORS.gold : "rgba(255,255,255,0.65)", fontWeight: view === item.id ? 700 : 400, fontSize: 14 }}>
+              <span style={{ fontSize: 16 }}>{item.icon}</span>
+              {item.label}
+              {item.id === "reports" && stats.pending > 0 && role === "manager" && (
+                <span style={{ marginRight: "auto", background: COLORS.red, color: "white", borderRadius: 10, padding: "1px 7px", fontSize: 11, fontWeight: 700 }}>{stats.pending}</span>
+              )}
+            </div>
+          ))}
+        </nav>
+        <div style={{ padding: "16px 16px 24px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: COLORS.gold + "30", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: COLORS.gold, fontWeight: 700 }}>م</div>
+            <div>
+              <div style={{ color: "white", fontSize: 13, fontWeight: 600 }}>محمد البقامي</div>
+              <div style={{ color: COLORS.gold, fontSize: 11 }}>{roleLabels[role]}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflow: "auto", padding: 28 }}>
+        {view === "dashboard" && (
+          <div>
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontWeight: 900, fontSize: 22, color: COLORS.navy }}>لوحة التحكم</div>
+              <div style={{ color: COLORS.gray600, fontSize: 14, marginTop: 4 }}>{new Date().toLocaleDateString("ar-SA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
+            </div>
+            <div style={{ display: "flex", gap: 14, marginBottom: 24, flexWrap: "wrap" }}>
+              <StatCard label="إجمالي التقارير" value={reports.length} color={COLORS.navy} icon="📄" />
+              <StatCard label="قيد المراجعة" value={stats.pending} color={COLORS.orange} icon="⏳" />
+              <StatCard label="معتمدة" value={stats.approved} color={COLORS.green} icon="✅" />
+              <StatCard label="تحتاج تعديل" value={stats.revision} color="#E5890A" icon="↩" />
+            </div>
+            <div style={{ background: COLORS.cardBg, borderRadius: 14, padding: 22, boxShadow: "0 2px 12px rgba(28,46,74,0.07)", marginBottom: 20 }}>
+              <div style={{ fontWeight: 800, fontSize: 16, color: COLORS.navy, marginBottom: 16 }}>آخر التقارير</div>
+              {reports.slice(0, 4).map(r => <ReportRow key={r.id} report={r} onSelect={setSelected} />)}
+            </div>
+            {role === "employee" && (
+              showForm
+                ? <SubmitForm onSubmit={handleSubmit} onCancel={() => setShowForm(false)} />
+                : <button onClick={() => setShowForm(true)} style={{ background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.goldLight})`, color: COLORS.navy, border: "none", borderRadius: 10, padding: "13px 28px", fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit", boxShadow: `0 4px 16px ${COLORS.gold}50` }}>
+                  + رفع تقرير جديد
+                </button>
+            )}
+          </div>
+        )}
+
+        {(view === "reports" || view === "all") && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 22, color: COLORS.navy }}>
+                  {view === "reports" && role === "manager" ? "التقارير المعلقة" : "جميع التقارير"}
+                </div>
+                <div style={{ color: COLORS.gray600, fontSize: 13, marginTop: 3 }}>{(view === "all" ? reports : visibleReports).length} تقرير</div>
+              </div>
+              {role === "employee" && (
+                <button onClick={() => setShowForm(true)} style={{ background: COLORS.gold, color: COLORS.navy, border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>+ تقرير جديد</button>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+              {["all", "pending", "approved", "revision", "rejected", "draft"].map(s => (
+                <button key={s} onClick={() => setFilterStatus(s)} style={{ padding: "6px 14px", borderRadius: 20, border: `1.5px solid ${filterStatus === s ? COLORS.gold : COLORS.gray200}`, background: filterStatus === s ? COLORS.gold : "white", color: filterStatus === s ? COLORS.navy : COLORS.gray600, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
+                  {s === "all" ? "الكل" : STATUS_MAP[s]?.label}
+                </button>
+              ))}
+            </div>
+            {showForm && <div style={{ marginBottom: 16 }}><SubmitForm onSubmit={handleSubmit} onCancel={() => setShowForm(false)} /></div>}
+            {(view === "all" ? reports : visibleReports).filter(r => filterStatus === "all" || r.status === filterStatus).map(r => <ReportRow key={r.id} report={r} onSelect={setSelected} />)}
+          </div>
+        )}
+      </div>
+
+      {selected && <ReportDetail report={selected} role={role} onClose={() => setSelected(null)} onAction={handleAction} />}
+    </div>
+  );
+}
